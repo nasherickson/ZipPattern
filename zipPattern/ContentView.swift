@@ -32,7 +32,7 @@ struct ContentView: View {
                 }) {
                     Image(systemName: "chevron.right")
                 }
-                Button("Open PDF") {
+                Button("Open PDF YAY!") {
                     showFilePicker = true
                 }
                 Spacer()
