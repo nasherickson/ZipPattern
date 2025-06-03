@@ -1,209 +1,277 @@
-//
-//  ContentView.swift
-//  zipPattern
-//
-//  Created by Nash Erickson on 5/28/25.
-//
-
 import SwiftUI
 import PDFKit
-import AppKit
+
 struct ContentView: View {
-    @Binding var window: NSWindow?
-    @State private var zoomScale: CGFloat = 1.0
-    @State private var pdfDoc: PDFDocument? = nil
+    @State private var isCalibrating = false
     @State private var showFilePicker = false
-    @State private var isFullScreen = false
-    @State private var loadError: String? = nil
-    @State private var showErrorAlert = false
-    @State private var contentOffset: CGSize = .zero
-
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var pdfDocument: PDFDocument? = nil
+    
+    // Adjustable grid state
+    @State private var gridWidth: Int = 18
+    @State private var gridHeight: Int = 24
+    
+    @State private var topLeft = CGPoint(x: 200, y: 200)
+    @State private var topRight = CGPoint(x: 600, y: 200)
+    @State private var bottomLeft = CGPoint(x: 200, y: 700)
+    @State private var bottomRight = CGPoint(x: 600, y: 700)
+    
     var body: some View {
-        VStack(spacing: 0) {
-            // Top controls bar
-            HStack {
-                Button(action: {
-                    NotificationCenter.default.post(name: .pdfPrevPage, object: nil)
-                }) {
-                    Image(systemName: "chevron.left")
-                }
-                Button(action: {
-                    NotificationCenter.default.post(name: .pdfNextPage, object: nil)
-                }) {
-                    Image(systemName: "chevron.right")
-                }
-                Button("Open PDF") {
-                    showFilePicker = true
-                }
-                Spacer()
-                Button(isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen") {
-                    window?.toggleFullScreen(nil)
-                }
+        ZStack {
+            // Background image
+            Image("BackgroundImage")
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+            Color.clear
+                .background(.ultraThinMaterial)
+                .ignoresSafeArea()
+                .opacity(0.98)
+            // PDF view (only if a PDF is loaded)
+            if let doc = pdfDocument {
+                PDFKitView(document: doc, scale: zoomScale)
+                    .ignoresSafeArea()
             }
-            .padding()
-            .background(Color.blue)
-
-            // Zoom controls
-            HStack {
-                Text("Zoom: \(Int(zoomScale * 100))%")
-                Slider(value: $zoomScale, in: 0.25...5.0, step: 0.05)
-            }
-            .padding()
-            .background(Color.red)
-
-            // PDF viewer fills remaining space
-            PDFKitView(pdfDocument: pdfDoc,
-                      zoomScale: zoomScale,
-                      contentOffset: $contentOffset)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.white)
-        }
-        .ignoresSafeArea(edges: .bottom)
-        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.pdf]) { result in
-            switch result {
-            case .success(let url):
-                if url.startAccessingSecurityScopedResource() {
-                    defer { url.stopAccessingSecurityScopedResource() }
-                    if let doc = PDFDocument(url: url) {
-                        pdfDoc = doc
-                        print("PDF loaded from: \(url)")
-                        print("Page count: \(doc.pageCount)")
-                    } else {
-                        loadError = "Failed to load PDF"
-                        showErrorAlert = true
-                    }
-                } else {
-                    loadError = "Cannot access file"
-                    showErrorAlert = true
-                }
-            case .failure(let err):
-                loadError = err.localizedDescription
-                showErrorAlert = true
-            }
-        }
-        .onChange(of: window) { newWindow in
-            guard let window = newWindow else { return }
-            NotificationCenter.default.addObserver(
-                forName: NSWindow.willEnterFullScreenNotification,
-                object: window, queue: .main) { _ in isFullScreen = true }
-            NotificationCenter.default.addObserver(
-                forName: NSWindow.willExitFullScreenNotification,
-                object: window, queue: .main) { _ in isFullScreen = false }
-        }
-        .alert("Failed to Load PDF", isPresented: $showErrorAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(loadError ?? "Unknown error occurred.")
-        }
-    }
-}
-
-struct PDFKitView: NSViewRepresentable {
-    typealias NSViewType = NSScrollView
-    let pdfDocument: PDFDocument?
-    let zoomScale: CGFloat
-    @Binding var contentOffset: CGSize
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    class Coordinator: NSObject {
-        var parent: PDFKitView
-        weak var pdfView: PDFView?
-        init(_ parent: PDFKitView) {
-            self.parent = parent
-            super.init()
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(goToNextPage),
-                name: .pdfNextPage,
-                object: nil
-            )
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(goToPrevPage),
-                name: .pdfPrevPage,
-                object: nil
-            )
-        }
-        @objc func handlePan(_ gesture: NSPanGestureRecognizer) {
-            let translation = gesture.translation(in: gesture.view)
-            print("Pan Δ:", translation)
-            parent.$contentOffset.wrappedValue = CGSize(
-                width: parent.$contentOffset.wrappedValue.width - translation.x,
-                height: parent.$contentOffset.wrappedValue.height - translation.y
-            )
-            print("New offset:", parent.$contentOffset.wrappedValue)
-            gesture.setTranslation(.zero, in: gesture.view)
-        }
-        @objc func goToNextPage() {
-            pdfView?.goToNextPage(nil)
             
+            // Calibration or regular grid overlays
+            if isCalibrating {
+                CalibrationGridOverlay(
+                    rows: gridHeight, columns: gridWidth,
+                    topLeft: topLeft, topRight: topRight,
+                    bottomLeft: bottomLeft, bottomRight: bottomRight
+                )
+                DraggableCorner(position: $topLeft)
+                DraggableCorner(position: $topRight)
+                DraggableCorner(position: $bottomLeft)
+                DraggableCorner(position: $bottomRight)
+                VStack {
+                    HStack {
+                        Text("Grid Width:")
+                        Picker("", selection: $gridWidth) {
+                            ForEach(12...36, id: \.self) { Text("\($0)") }
+                        }.frame(width: 60)
+                        Text("Grid Height:")
+                        Picker("", selection: $gridHeight) {
+                            ForEach(12...36, id: \.self) { Text("\($0)") }
+                        }.frame(width: 60)
+                        Spacer()
+                    }
+                    .padding(8)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(14)
+                    .padding()
+                    Spacer()
+                }
+            } else {
+                GridOverlayView(rows: 6, columns: 6)
+            }
+            
+            //Floating compass controls in upper right
+            VStack {
+                HStack {
+                    Spacer()
+                    GeometryReader { geo in
+                        let minSide = min(geo.size.width, geo.size.height)
+                        // Make the compass scale down, never smaller than 120x120, never bigger than 220x220
+                        CompassControls(
+                            calibrateAction: { isCalibrating.toggle() },
+                            openPDFAction: { showFilePicker = true },
+                            zoomOutAction: { zoomScale = max(zoomScale - 0.1, 0.25) },
+                            zoomInAction: { zoomScale = min(zoomScale + 0.1, 5.0) }
+                        )
+                        .padding([.top, .trailing], 24)
+                    }
+                    Spacer()
+                }
+                
+                Text("Hello, zipPattern!")
+                    .font(.largeTitle)
+                    .foregroundColor(.white)
+                    .shadow(radius: 4)
+            }
+            .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.pdf]) { result in
+                if case .success(let url) = result {
+                    if let doc = PDFDocument(url: url) {
+                        pdfDocument = doc
+                    }
+                }
+            }
         }
-        @objc func goToPrevPage() {
-            pdfView?.goToPreviousPage(nil)
+    }
+    
+    // ---- Helper views (leave these below) ----
+    
+    struct GridOverlayView: View {
+        let rows: Int
+        let columns: Int
+        
+        var body: some View {
+            GeometryReader { geometry in
+                Path { path in
+                    let width = geometry.size.width
+                    let height = geometry.size.height
+                    
+                    // Vertical lines
+                    for col in 0...columns {
+                        let x = width * CGFloat(col) / CGFloat(columns)
+                        path.move(to: CGPoint(x: x, y: 0))
+                        path.addLine(to: CGPoint(x: x, y: height))
+                    }
+                    // Horizontal lines
+                    for row in 0...rows {
+                        let y = height * CGFloat(row) / CGFloat(rows)
+                        path.move(to: CGPoint(x: 0, y: y))
+                        path.addLine(to: CGPoint(x: width, y: y))
+                    }
+                }
+                .stroke(Color.white.opacity(0.5), lineWidth: 1)
+            }
+            .allowsHitTesting(false)
         }
-        deinit {
-            NotificationCenter.default.removeObserver(self)
+    }
+    
+    struct DraggableCorner: View {
+        @Binding var position: CGPoint
+        
+        var body: some View {
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: 28, height: 28)
+                .overlay(Circle().stroke(Color.white, lineWidth: 3))
+                .shadow(radius: 5)
+                .position(position)
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in position = value.location }
+                )
+        }
+    }
+    
+    struct CalibrationGridOverlay: View {
+        let rows: Int
+        let columns: Int
+        let topLeft: CGPoint
+        let topRight: CGPoint
+        let bottomLeft: CGPoint
+        let bottomRight: CGPoint
+        
+        var body: some View {
+            GeometryReader { _ in
+                Path { path in
+                    for row in 0...rows {
+                        let t = CGFloat(row) / CGFloat(rows)
+                        let start = interpolate(from: topLeft, to: bottomLeft, t: t)
+                        let end = interpolate(from: topRight, to: bottomRight, t: t)
+                        path.move(to: start)
+                        path.addLine(to: end)
+                    }
+                    for col in 0...columns {
+                        let t = CGFloat(col) / CGFloat(columns)
+                        let start = interpolate(from: topLeft, to: topRight, t: t)
+                        let end = interpolate(from: bottomLeft, to: bottomRight, t: t)
+                        path.move(to: start)
+                        path.addLine(to: end)
+                    }
+                }
+                .stroke(Color.green.opacity(0.6), lineWidth: 1.2)
+            }
+            .allowsHitTesting(false)
         }
         
-    }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let pdfView = PDFView()
-        pdfView.translatesAutoresizingMaskIntoConstraints = true
-        pdfView.autoresizingMask = [.width, .height]
-        pdfView.autoScales = true
-        pdfView.minScaleFactor = 0.25
-        pdfView.maxScaleFactor = 5.0
-        pdfView.displayMode = .singlePageContinuous
-        pdfView.displayDirection = .vertical
-
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
-        scrollView.documentView = pdfView
-
-        // Add pan gesture recognizer for click-and-drag on clip view
-        let panGesture = NSPanGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handlePan(_:))
-        )
-        panGesture.allowedTouchTypes = [.direct, .indirect]
-        panGesture.delegate = context.coordinator as? any NSGestureRecognizerDelegate
-        scrollView.contentView.addGestureRecognizer(panGesture)
-
-        return scrollView
-    }
-    func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let pdfView = nsView.documentView as? PDFView else { return }
-        context.coordinator.pdfView = pdfView
-        pdfView.document = pdfDocument
-        pdfView.scaleFactor = zoomScale
-        var origin = nsView.contentView.bounds.origin
-        origin.x = $contentOffset.wrappedValue.width
-        origin.y = $contentOffset.wrappedValue.height
-        nsView.contentView.setBoundsOrigin(origin)
-        nsView.reflectScrolledClipView(nsView.contentView)
-        if pdfDocument != nil {
-            pdfView.goToFirstPage(nil)
+        private func interpolate(from: CGPoint, to: CGPoint, t: CGFloat) -> CGPoint {
+            CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
         }
     }
-}
-
-struct WindowAccessor: NSViewRepresentable {
-    @Binding var window: NSWindow?
-    func makeNSView(context: Context) -> NSView {
-        let nsView = NSView()
-        DispatchQueue.main.async { self.window = nsView.window }
-        return nsView
+    
+    struct CompassControls: View {
+        let calibrateAction: () -> Void
+        let openPDFAction: () -> Void
+        let zoomOutAction: () -> Void
+        let zoomInAction: () -> Void
+        
+        var body: some View {
+            ZStack {
+                // North: Calibrate
+                VStack {
+                    BlurryButton(action: calibrateAction, systemImage: "ruler", label: "Calibrate")
+                    Spacer()
+                }
+                
+                // South: Open PDF
+                VStack {
+                    Spacer()
+                    BlurryButton(action: openPDFAction, systemImage: "doc.richtext", label: "Open PDF")
+                }
+                
+                // West: Zoom Out
+                HStack {
+                    BlurryButton(action: zoomOutAction, systemImage: "minus.magnifyingglass", label: "Zoom Out")
+                    Spacer()
+                }
+                
+                // East: Zoom In
+                HStack {
+                    Spacer()
+                    BlurryButton(action: zoomInAction, systemImage: "plus.magnifyingglass", label: "Zoom In")
+                }
+            }
+            .frame(width: 220, height: 220)
+            .allowsHitTesting(true)
+        }
     }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-}
     
+    struct BlurryButton: View {
+        let action: () -> Void
+        let systemImage: String
+        let label: String
+        @State private var hovered = false
+        
+        var body: some View {
+            Button(action: action) {
+                VStack {
+                    Image(systemName: systemImage)
+                        .resizable()
+                        .frame(width: 36, height: 36)
+                    Text(label)
+                        .font(.caption)
+                }
+                .padding(10)
+                .background(.ultraThinMaterial, in: Capsule())
+                .shadow(color: Color.black.opacity(0.15), radius: hovered ? 10 : 6, x: 0, y: 2)
+                .scaleEffect(hovered ? 1.08 : 1.0)
+                .opacity(hovered ? 1.0 : 0.92)
+                .animation(.easeOut(duration: 0.18), value: hovered)
+            }
+            .buttonStyle(.plain)
+            .onHover { over in
+                hovered = over
+            }
+        }
+    }
     
-
-#Preview {
-    ContentView(window: .constant(nil))
+    struct PDFKitView: NSViewRepresentable {
+        var document: PDFDocument?
+        var scale: CGFloat
+        
+        func makeNSView(context: Context) -> PDFView {
+            let pdfView = PDFView()
+            pdfView.autoScales = false
+            pdfView.displayMode = .singlePageContinuous
+            pdfView.displayDirection = .vertical
+            pdfView.backgroundColor = .clear
+            pdfView.minScaleFactor = 0.25
+            pdfView.maxScaleFactor = 5.0
+            return pdfView
+        }
+        
+        func updateNSView(_ pdfView: PDFView, context: Context) {
+            pdfView.document = document
+            pdfView.scaleFactor = scale
+        }
+    }
+    struct ContentView_Previews: PreviewProvider {
+        static var previews: some View {
+            ContentView()
+        }
+    }
 }
